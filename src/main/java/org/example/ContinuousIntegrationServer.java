@@ -52,31 +52,48 @@ public class ContinuousIntegrationServer extends AbstractHandler
             String fullName = json.getJSONObject("repository").getString("full_name");
             String branchName = json.getString("ref").replace("refs/heads/", "");
 
+            String statusesUrlTemplate = json.getJSONObject("repository").optString("statuses_url", null);
+            String sha = json.optString("after", null);
+            String statusesUrl = GitHubStatusClient.resolveStatusesUrl(statusesUrlTemplate, sha);
+            String token = System.getProperty("githubToken");
+
+            // Set initial GitHub commit status to 'Pending'
+            try {
+                GitHubStatusClient.postStatus(statusesUrl, "pending", "Build started", fullName, token);
+            } catch (IOException e) {
+                System.out.println("Failed to post pending status to GitHub");
+            }
+
             File repoDir = Utils.createHashedDir(fullName);
             String absoluteRepoDir = repoDir.getAbsolutePath();
 
-            // Core CI feature #1: Set up and build (compile)
-            boolean cloneRepo = !repoDir.exists();
-            boolean repoSuccess = CommandRunner.cloneOrFetchRepo(cloneRepo, cloneUrl, absoluteRepoDir, branchName);            
-            boolean buildSuccess = CommandRunner.buildRepo(absoluteRepoDir);
+            boolean buildSuccess = false;
+            boolean testsSuccess = false;
+            try {
+                // Core CI feature #1: Set up and build (compile)
+                boolean cloneRepo = !repoDir.exists();
+                boolean repoSuccess = CommandRunner.cloneOrFetchRepo(cloneRepo, cloneUrl, absoluteRepoDir, branchName);
+                buildSuccess = repoSuccess &&  CommandRunner.buildRepo(absoluteRepoDir);
 
-            if (buildSuccess) {
-                System.out.println("✅ Build succeeded!");
-            } else {
-                System.out.println("❌ Build failed");
+                // Core CI feature #2: Run tests
+                testsSuccess = CommandRunner.testRepo(absoluteRepoDir);
+            } finally {
+                // Send final commit status to GitHub
+                try {
+                    if (!buildSuccess) {
+                        System.out.println("❌ Build failed");
+                        GitHubStatusClient.postStatus(statusesUrl, "failure", "Build failed!", fullName, token);
+                    } else if (!testsSuccess) {
+                        System.out.println("❌ Tests failed");
+                        GitHubStatusClient.postStatus(statusesUrl, "failure", "Tests failed!", fullName, token);
+                    } else {
+                        System.out.println("✅ Build & tests succeeded!");
+                        GitHubStatusClient.postStatus(statusesUrl, "success", "Build succeeded and tests passed!", fullName, token);
+                    }
+                } catch (IOException e) {
+                    System.out.println("Failed to post final status to GitHub");
+                }
             }
-
-            // Core CI feature #2: Run tests
-            boolean testSuccess = CommandRunner.testRepo(absoluteRepoDir);
-            
-            if (testSuccess) {
-                System.out.println("✅ Tests succeeded!");
-            } else {
-                System.out.println("❌ Tests failed");
-            }
-
-            // Core CI feature #3: Notification
-            // ...
         }
 
         // Needed for SHA-256 to run
