@@ -71,7 +71,7 @@ class CommandRunnerTest {
 
     @Test
     @DisplayName("Cloning the repo of this code succeeds")
-    void testCloningThisRepoSucceeds() {
+    void testCloningThisRepoSucceeds() { 
         try {
             File repoDir = new File(tempDir, "repo");
             String absoluteRepoDir = repoDir.getAbsolutePath();
